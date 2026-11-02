@@ -101,13 +101,12 @@ public class GuardService extends AccessibilityService {
                     schedule(150);
                     return;
                 }
-                // 任何事件都说明这个 App 在活动。
-                // 只认 WINDOW_STATE_CHANGED 不够：桌面和部分启动器只发内容变化事件，
-                // 那样会一直以为还在原来的 App 里，人已经到桌面了还被盖着。
-                curPkg = p;
-                if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-                    CharSequence cn = event.getClassName();
-                    if (cn != null) curActivity = cn.toString();
+                // 受管 App 的事件立即生效：进入要快，遮罩才灵敏。
+                // 非受管包（桌面、系统组件、悬浮窗）不在这里改判，
+                // 交给 evaluate 里的"持续 1.5 秒确认"，避免遮罩刚出来就被撤。
+                if (prefs.managedApps().contains(p)) {
+                    curPkg = p;
+                    candidatePkg = "";
                 }
             }
             schedule(150);
@@ -124,6 +123,56 @@ public class GuardService extends AccessibilityService {
 
     private long lastForegroundCheck = 0L;
     private long lastFgCheck = 0L;
+    private String candidatePkg = "";
+    private long candidateSince = 0L;
+
+    /** 某个包是否还有可见的应用窗口。 */
+    private boolean isWindowVisible(String pkg) {
+        try {
+            List<AccessibilityWindowInfo> ws = getWindows();
+            if (ws == null) return false;
+            for (AccessibilityWindowInfo w : ws) {
+                if (w == null || w.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+                AccessibilityNodeInfo r = null;
+                try {
+                    r = w.getRoot();
+                } catch (Throwable ignored) {
+                }
+                if (r == null) continue;
+                CharSequence p = r.getPackageName();
+                if (p != null && pkg.equals(p.toString())) return true;
+            }
+        } catch (Throwable ignored) {
+        }
+        return false;
+    }
+
+    /**
+     * 前台切换分两种情况：
+     * 进入受管 App —— 立刻认，遮罩要及时出现；
+     * 离开（桌面、其它 App）—— 要持续 1.5 秒才认，避免系统组件/悬浮窗瞬时抢占
+     * 导致遮罩刚出来就被撤掉。
+     */
+    private void confirmForeground(String fg, long now) {
+        if (fg.equals(curPkg)) {
+            candidatePkg = "";
+            return;
+        }
+        if (prefs.managedApps().contains(fg)) {
+            curPkg = fg;
+            candidatePkg = "";
+            return;
+        }
+        if (!fg.equals(candidatePkg)) {
+            candidatePkg = fg;
+            candidateSince = now;
+            return;
+        }
+        if (now - candidateSince >= 1500) {
+            curPkg = fg;
+            candidatePkg = "";
+        }
+    }
 
     /** 输入法、系统 UI 这类窗口会跑到最上层，不能当成"前台 App" */
     private java.util.Set<String> ignorePkgs = new java.util.HashSet<String>();
@@ -283,12 +332,21 @@ public class GuardService extends AccessibilityService {
         // 不行再退到使用情况统计，最后才用事件里的包名。
         // 三条路互补，不同 ROM 上总有能用的。
         long nowMs = System.currentTimeMillis();
-        if (nowMs - lastFgCheck >= 700) {
-            lastFgCheck = nowMs;
-            String fg = foregroundFromWindows();
-            if (fg == null) fg = foregroundFromUsage();
-            if (fg != null && !getPackageName().equals(fg) && !ignorePkgs.contains(fg)) {
-                curPkg = fg;
+
+        // 进入受管 App：由它的无障碍事件设置 curPkg（可靠）。
+        // 离开：不再猜"谁是前台"，而是检查受管 App 的窗口是否还存在于窗口列表。
+        // 窗口列表反映的是真实可见窗口，比"活动窗口是谁"稳定得多。
+        if (curPkg.length() > 0 && prefs.managedApps().contains(curPkg)) {
+            if (!isWindowVisible(curPkg)) {
+                if (!"__gone__".equals(candidatePkg)) {
+                    candidatePkg = "__gone__";
+                    candidateSince = nowMs;
+                } else if (nowMs - candidateSince >= 1200) {
+                    curPkg = "";
+                    candidatePkg = "";
+                }
+            } else {
+                candidatePkg = "";
             }
         }
 

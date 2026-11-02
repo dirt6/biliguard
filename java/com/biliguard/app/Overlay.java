@@ -64,13 +64,25 @@ public class Overlay {
     }
 
     public boolean isShowing() {
-        return root != null;
+        // 只看引用不够：窗口可能已被系统移除，但 View 引用还在。
+        // 那种情况下服务会一直以为"正在遮"，再也不重新创建。
+        return root != null && root.getParent() != null;
     }
 
     public void show(String hint) {
-        if (root != null) {
+        if (root != null && root.getParent() != null) {
             if (hintView != null) hintView.setText(hint);
             return;
+        }
+        if (root != null) {
+            // 窗口已经丢了，清掉引用重新创建
+            try {
+                wm.removeView(root);
+            } catch (Throwable ignored) {
+            }
+            root = null;
+            hintView = null;
+            clockView = null;
         }
         try {
             build(hint);

@@ -20,3 +20,6 @@ local.properties
 
 # 签名辅助文件
 *.idsig
+
+# Windows 保留名
+NUL
