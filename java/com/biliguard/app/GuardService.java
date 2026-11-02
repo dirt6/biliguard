@@ -107,6 +107,8 @@ public class GuardService extends AccessibilityService {
                 if (prefs.managedApps().contains(p)) {
                     curPkg = p;
                     candidatePkg = "";
+                    CharSequence cn = event.getClassName();
+                    if (cn != null) curActivity = cn.toString();
                 }
             }
             schedule(150);
@@ -125,6 +127,7 @@ public class GuardService extends AccessibilityService {
     private long lastFgCheck = 0L;
     private String candidatePkg = "";
     private long candidateSince = 0L;
+    private String lastPkg = "";
 
     /** 某个包是否还有可见的应用窗口。 */
     private boolean isWindowVisible(String pkg) {
@@ -361,6 +364,14 @@ public class GuardService extends AccessibilityService {
                 }
             } catch (Exception ignored) {
             }
+        }
+
+        // 切换了 App 就清掉"学习视频宽限记忆"。
+        // 那份记忆只在同一个 App 内有效：从 B 站点开学习视频后切到抖音，
+        // 抖音不该被当成"还在看那个学习视频"而放行。
+        if (!curPkg.equals(lastPkg)) {
+            stickyUntil = 0L;
+            lastPkg = curPkg;
         }
 
         // 前台已经不是受管 App（回了桌面、切到别的应用）：立刻撤，不能有任何延迟
