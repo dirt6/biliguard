@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">当真好好学习</string>
+    <string name="service_label">当真好好学习 · 学习模式</string>
+    <string name="service_desc">识别哔哩哔哩当前播放的视频：白名单里的学习视频随时可看；其他视频只在设定的自由时段内放行，其余时间盖一层遮罩。</string>
+</resources>

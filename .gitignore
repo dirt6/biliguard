@@ -1,0 +1,22 @@
+# 构建产物
+build/
+*.apk
+*.aab
+
+# 签名文件（不要提交）
+debug.keystore
+*.keystore
+*.jks
+
+# 本地工具链
+_android/
+_tools/
+
+# IDE
+.idea/
+*.iml
+.gradle/
+local.properties
+
+# 签名辅助文件
+*.idsig
