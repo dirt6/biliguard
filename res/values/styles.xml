@@ -7,4 +7,11 @@
         <item name="android:statusBarColor">#FF14528F</item>
         <item name="android:windowBackground">#FFF5F6F8</item>
     </style>
+
+    <style name="MaskTheme" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#FF0E1116</item>
+        <item name="android:statusBarColor">#FF0E1116</item>
+        <item name="android:navigationBarColor">#FF0E1116</item>
+        <item name="android:windowFullscreen">false</item>
+    </style>
 </resources>

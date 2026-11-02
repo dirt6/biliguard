@@ -65,6 +65,19 @@ public class MainActivity extends Activity {
         prefs = new Prefs(this);
         setContentView(buildUi());
         refreshAll();
+        askNotificationPermission();
+    }
+
+    private void askNotificationPermission() {
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 33) {
+                if (checkSelfPermission("android.permission.POST_NOTIFICATIONS")
+                        != PackageManager.PERMISSION_GRANTED) {
+                    requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 2001);
+                }
+            }
+        } catch (Throwable ignored) {
+        }
     }
 
     @Override

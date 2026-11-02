@@ -413,14 +413,148 @@ public class GuardService extends AccessibilityService {
             clear();
             return;
         }
-        overlay.show(Model.nextFreeText(prefs.windowsRaw(), minute));
-        lastReason = "show";
-        // 遮罩盖上之后继续复查：B 站标题往往要一两秒才渲染出来，
-        // 那时应该自动把遮罩撤掉，而不是让学习视频一直被挡。
-        if (retryCount < 45) {
-            retryCount++;
-            handler.removeCallbacks(retryTask);
-            handler.postDelayed(retryTask, 3000);
+        String hint = Model.nextFreeText(prefs.windowsRaw(), minute);
+        if (isMiuiLike()) {
+            // 小米 HyperOS 会移除无障碍覆盖窗口，但允许有悬浮窗权限的应用
+            // 后台启动 Activity，所以这里用全屏拦截页代替遮罩窗口。
+            lastReason = "mask-activity";
+            showMaskActivity(hint);
+        } else {
+            overlay.show(hint);
+            lastReason = "show";
+            // 遮罩盖上之后继续复查：B 站标题往往要一两秒才渲染出来，
+            // 那时应该自动把遮罩撤掉，而不是让学习视频一直被挡。
+            if (retryCount < 45) {
+                retryCount++;
+                handler.removeCallbacks(retryTask);
+                handler.postDelayed(retryTask, 3000);
+            }
+        }
+    }
+
+    private long lastKick = 0L;
+
+    /** 小米模式：拉起全屏拦截页（不依赖会被系统移除的覆盖窗口）。 */
+    private void showMaskActivity(String hint) {
+        long now = System.currentTimeMillis();
+        if (now - lastKick < 3500) return;
+        lastKick = now;
+        try {
+            android.content.Intent i = new android.content.Intent(this, MaskActivity.class);
+            i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                    | android.content.Intent.FLAG_ACTIVITY_NO_ANIMATION);
+            i.putExtra("hint", hint);
+            startActivity(i);
+        } catch (Throwable ignored) {
+        }
+        postNotification(hint);
+    }
+
+    /** 兜底：切回桌面。 */
+    private void kickHome(String hint) {
+        long now = System.currentTimeMillis();
+        if (now - lastKick < 4000) return;
+        lastKick = now;
+        suppress(2500);
+        boolean ok = false;
+        try {
+            ok = performGlobalAction(GLOBAL_ACTION_HOME);
+        } catch (Throwable ignored) {
+        }
+        if (!ok) {
+            // 兜底：有些系统对 performGlobalAction 不响应，用显式 HOME Intent
+            try {
+                android.content.Intent i = new android.content.Intent(android.content.Intent.ACTION_MAIN);
+                i.addCategory(android.content.Intent.CATEGORY_HOME);
+                i.setFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(i);
+            } catch (Throwable ignored) {
+            }
+        }
+        postNotification(hint);
+    }
+
+    private void postNotification(String hint) {
+        try {
+            android.app.NotificationManager nm =
+                    (android.app.NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+            if (nm == null) return;
+            String ch = "guard_kick";
+            if (android.os.Build.VERSION.SDK_INT >= 26) {
+                android.app.NotificationChannel c = new android.app.NotificationChannel(
+                        ch, "学习时间提醒", android.app.NotificationManager.IMPORTANCE_DEFAULT);
+                c.setDescription("被拦下时提醒你回去学习");
+                nm.createNotificationChannel(c);
+            }
+            android.app.Notification.Builder b = android.os.Build.VERSION.SDK_INT >= 26
+                    ? new android.app.Notification.Builder(this, ch)
+                    : new android.app.Notification.Builder(this);
+            b.setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+                    .setContentTitle("现在是学习时间")
+                    .setContentText(hint)
+                    .setAutoCancel(true);
+
+            android.graphics.Bitmap pic = notificationPicture();
+            if (pic != null) {
+                b.setStyle(new android.app.Notification.BigPictureStyle()
+                        .bigPicture(pic)
+                        .setSummaryText(hint));
+            } else {
+                android.app.Notification.BigTextStyle bt = new android.app.Notification.BigTextStyle();
+                bt.bigText(hint);
+                b.setStyle(bt);
+            }
+            try {
+                android.content.Intent i = new android.content.Intent(this, MainActivity.class);
+                i.setFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                android.app.PendingIntent pi = android.app.PendingIntent.getActivity(
+                        this, 0, i,
+                        android.os.Build.VERSION.SDK_INT >= 23
+                                ? android.app.PendingIntent.FLAG_IMMUTABLE
+                                : 0);
+                b.setContentIntent(pi);
+            } catch (Throwable ignored) {
+            }
+            nm.notify(1001, b.build());
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** 取一张用户上传的遮罩图作为通知大图。 */
+    private android.graphics.Bitmap notificationPicture() {
+        try {
+            java.util.List<String> uris = prefs.maskUrisList();
+            if (uris.isEmpty()) return null;
+            String pick = uris.get(new java.util.Random().nextInt(uris.size()));
+            android.net.Uri uri = android.net.Uri.parse(pick);
+            android.graphics.BitmapFactory.Options probe = new android.graphics.BitmapFactory.Options();
+            probe.inJustDecodeBounds = true;
+            java.io.InputStream in = getContentResolver().openInputStream(uri);
+            android.graphics.BitmapFactory.decodeStream(in, null, probe);
+            if (in != null) in.close();
+            int sample = 1;
+            while (probe.outWidth / sample > 720 || probe.outHeight / sample > 720) sample *= 2;
+            android.graphics.BitmapFactory.Options real = new android.graphics.BitmapFactory.Options();
+            real.inSampleSize = sample;
+            java.io.InputStream in2 = getContentResolver().openInputStream(uri);
+            android.graphics.Bitmap bmp = android.graphics.BitmapFactory.decodeStream(in2, null, real);
+            if (in2 != null) in2.close();
+            return bmp;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** 小米系（HyperOS / MIUI）判断。 */
+    private boolean isMiuiLike() {
+        try {
+            String m = android.os.Build.MANUFACTURER;
+            String b = android.os.Build.BRAND;
+            String s = (m == null ? "" : m) + "|" + (b == null ? "" : b);
+            s = s.toLowerCase();
+            return s.contains("xiaomi") || s.contains("redmi") || s.contains("poco");
+        } catch (Throwable t) {
+            return false;
         }
     }
 
@@ -527,8 +661,10 @@ public class GuardService extends AccessibilityService {
 
     private List<NodeText> grabNodes() {
         List<NodeText> out = new ArrayList<NodeText>();
-        // 遮罩显示后，getRootInActiveWindow() 拿到的是我们自己的遮罩窗口，
-        // 所以遍历所有窗口，跳过本应用的窗口，才能读到 B 站真正的标题。
+        // 只读「当前前台 App」的窗口。
+        // 如果遍历所有窗口，后台 App（比如还开着的 B 站）的文字也会被读到，
+        // 于是它的「点我发弹幕」会让记忆层误以为还在播放页，把别的 App 也放行。
+        String want = curPkg;
         List<AccessibilityWindowInfo> windows = null;
         try {
             windows = getWindows();
@@ -538,6 +674,7 @@ public class GuardService extends AccessibilityService {
             String self = getPackageName();
             for (AccessibilityWindowInfo w : windows) {
                 if (w == null) continue;
+                if (w.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
                 AccessibilityNodeInfo root = null;
                 try {
                     root = w.getRoot();
@@ -549,7 +686,10 @@ public class GuardService extends AccessibilityService {
                     p = root.getPackageName();
                 } catch (Exception ignored) {
                 }
-                if (p != null && self.equals(p.toString())) continue;
+                if (p == null) continue;
+                String pkg = p.toString();
+                if (self.equals(pkg)) continue;
+                if (want != null && want.length() > 0 && !want.equals(pkg)) continue;
                 int[] count = new int[]{0};
                 walk(root, out, 0, count);
             }
