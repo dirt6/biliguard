@@ -64,12 +64,12 @@ public class Overlay {
     }
 
     public boolean isShowing() {
-        // 只看引用不够：窗口可能已被系统移除，但 View 引用还在。
-        // 那种情况下服务会一直以为"正在遮"，再也不重新创建。
-        // isAttachedToWindow 才能真正反映"还挂在窗口上"。
+        // 刚 addView 时 View 可能还没 attach，用时间窗口做乐观判断，
+        // 避免"刚显示就被判为没显示"而反复重建。
         if (root == null) return false;
+        if (System.currentTimeMillis() - shownAt < 1500) return true;
         try {
-            return root.isAttachedToWindow() && root.getParent() != null;
+            return root.getParent() != null;
         } catch (Throwable t) {
             return false;
         }
@@ -96,14 +96,11 @@ public class Overlay {
             root = null;
             return;
         }
-        int winType;
-        if (android.os.Build.VERSION.SDK_INT >= 26
-                && android.provider.Settings.canDrawOverlays(svc)) {
-            // 有悬浮窗权限时用系统标准类型，Android 14+ 上比无障碍覆盖窗口可靠
-            winType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY;
-        } else {
-            winType = WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY;
-        }
+        // 一律使用无障碍覆盖窗口。
+        // 实测小米 HyperOS / Android 16 上，标准悬浮窗（APPLICATION_OVERLAY）
+        // addView 不报错但窗口会被系统丢弃；无障碍覆盖窗口配合 isAccessibilityTool
+        // 才是稳定的那个。
+        int winType = WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY;
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.MATCH_PARENT,
