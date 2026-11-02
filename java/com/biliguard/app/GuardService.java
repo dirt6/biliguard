@@ -311,13 +311,14 @@ public class GuardService extends AccessibilityService {
     }
 
     private long lastDbg = 0L;
+    private String lastReason = "";
 
     private void writeDebug() {
         long now = System.currentTimeMillis();
         if (now - lastDbg < 2000) return;
         lastDbg = now;
         try {
-            prefs.setDebug(curPkg, curActivity, overlay != null && overlay.isShowing(), now);
+            prefs.setDebug(curPkg, curActivity, overlay != null && overlay.isShowing(), now, lastReason);
         } catch (Throwable ignored) {
         }
     }
@@ -327,6 +328,7 @@ public class GuardService extends AccessibilityService {
 
         // 点了「离开」之后的抑制期：给系统一点时间切回桌面，别立刻又盖上
         if (System.currentTimeMillis() < suppressUntil) {
+            lastReason = "suppress";
             clear();
             return;
         }
@@ -376,6 +378,7 @@ public class GuardService extends AccessibilityService {
 
         // 前台已经不是受管 App（回了桌面、切到别的应用）：立刻撤，不能有任何延迟
         if (!prefs.managedApps().contains(curPkg)) {
+            lastReason = "not-managed:" + curPkg;
             clear();
             return;
         }
@@ -390,23 +393,28 @@ public class GuardService extends AccessibilityService {
         }
         long now = System.currentTimeMillis();
         if (now < prefs.graceUntil()) {
+            lastReason = "grace";
             clear();
             return;
         }
         if (now < prefs.tempPassUntil()) {
+            lastReason = "temp-pass";
             clear();
             return;
         }
         int minute = Model.nowMinute();
         if (Model.isFreeTime(prefs.windowsRaw(), minute)) {
+            lastReason = "free-time";
             clear();
             return;
         }
         if (isStudyOnScreen()) {
+            lastReason = "study";
             clear();
             return;
         }
         overlay.show(Model.nextFreeText(prefs.windowsRaw(), minute));
+        lastReason = "show";
         // 遮罩盖上之后继续复查：B 站标题往往要一两秒才渲染出来，
         // 那时应该自动把遮罩撤掉，而不是让学习视频一直被挡。
         if (retryCount < 45) {
@@ -487,10 +495,20 @@ public class GuardService extends AccessibilityService {
             }
         }
 
-        // 3) 记忆层：标题读不到，但刚才确认过是学习视频，而且人还在播放详情页
-        if (stickyUntil > now && isDetailPage()) return true;
+        // 3) 记忆层：标题读不到，但刚才确认过是学习视频，而且页面上还有播放器控件。
+        //    用「点我发弹幕」这类控件判断是否仍在播放页，比 Activity 类名可靠：
+        //    B 站内部换页面时类名常常不更新，会把首页也误当成详情页放行。
+        if (stickyUntil > now && hasPlayControls(nodes)) return true;
 
         if (total < 80) return prefs.allowUnknown();
+        return false;
+    }
+
+    /** 页面上是否还有播放器控件（说明仍在视频播放页，而不是首页信息流）。 */
+    private boolean hasPlayControls(List<NodeText> nodes) {
+        for (NodeText n : nodes) {
+            if (n.text != null && n.text.contains("点我发弹幕")) return true;
+        }
         return false;
     }
 

@@ -66,7 +66,13 @@ public class Overlay {
     public boolean isShowing() {
         // 只看引用不够：窗口可能已被系统移除，但 View 引用还在。
         // 那种情况下服务会一直以为"正在遮"，再也不重新创建。
-        return root != null && root.getParent() != null;
+        // isAttachedToWindow 才能真正反映"还挂在窗口上"。
+        if (root == null) return false;
+        try {
+            return root.isAttachedToWindow() && root.getParent() != null;
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     public void show(String hint) {

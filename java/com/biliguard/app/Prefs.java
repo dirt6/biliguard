@@ -128,12 +128,13 @@ public class Prefs {
     }
 
     /** 诊断用：记录服务最近一次判断时的真实状态。 */
-    public void setDebug(String pkg, String act, boolean showing, long ts) {
+    public void setDebug(String pkg, String act, boolean showing, long ts, String reason) {
         sp.edit()
                 .putString("dbg_pkg", pkg == null ? "" : pkg)
                 .putString("dbg_act", act == null ? "" : act)
                 .putBoolean("dbg_show", showing)
                 .putLong("dbg_ts", ts)
+                .putString("dbg_reason", reason == null ? "" : reason)
                 .apply();
     }
 
